@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Encode End-of-Year Party</title>
+  <script src="https://cdn.jsdelivr.net/npm/p5@1.9.4/lib/p5.min.js"></script>
+  <style>
+    html, body { margin: 0; padding: 0; background: #EE2A37; overflow: hidden; }
+  </style>
+</head>
+<body>
+<script>
+const INVITE_URL = 'https://luma.com/p64iv1t6';
+
+const PILLAR_RED = '#EE2A37';   // sampled from the Pillar logo (238, 42, 55)
+
+// The invite sentence, set as a block of text that is built out of dots.
+const TEXT_LINES = [
+  { t: "You're invited to",      size: 60,  bold: true  },
+  { t: "Pillar VC's",            size: 110, bold: true  },
+  { t: "Encode End-of-Year",     size: 76,  bold: true  },
+  { t: "Party",                  size: 110, bold: true  },
+  { t: "Thursday 3rd December",  size: 56,  bold: true  },
+  { t: "from 6PM at the",        size: 56,  bold: true  },
+  { t: "Pillar London Office",   size: 56,  bold: true  },
+];
+
+const GRID = 1000;   // text is rasterised on a 1000x1000 grid, then sampled
+const STEP = 4;      // sampling step, in grid pixels (smaller = denser dots)
+
+let arm = [];        // one arm of the flake, in units of R
+let textDots = [];   // text dots, in units of R (-1..1)
+let R, cx, cy;
+
+// ripple state
+let front = 0;       // radius of the expanding ring (px)
+let ox = 0, oy = 0;  // ripple origin, relative to flake centre
+let amp = 0;         // ripple strength, eased
+let hoverAmt = 0;    // eased hover state
+let angle = 0;       // integrated spin angle
+
+// scratch values written by sampleWave()
+let wRev = 0, wWave = 0, wDx = 0, wDy = 0;
+
+function setup() {
+  createCanvas(windowWidth, windowHeight);
+  buildArm();
+  buildTextDots();
+  layout();
+}
+
+function windowResized() {
+  resizeCanvas(windowWidth, windowHeight);
+  layout();
+}
+
+function layout() {
+  R = min(width, height) * 0.38;
+  cx = width / 2;
+  cy = height / 2;
+}
+
+function buildArm() {
+  arm = [];
+  const N = 14;
+  const a = radians(60);
+  const branches = [[4, 3], [7, 4], [10, 3], [13, 2]];
+  for (let i = 1; i <= N; i++) arm.push({ x: i / N, y: 0, s: i === N ? 1.6 : 1.0 });
+  for (const [idx, count] of branches) {
+    for (let k = 1; k <= count; k++) {
+      const x = (idx + k * cos(a)) / N;
+      const y = (k * sin(a)) / N;
+      const s = k === count ? 1.3 : 0.85;
+      arm.push({ x, y, s });
+      arm.push({ x, y: -y, s });
+    }
+  }
+}
+
+// Render the text offscreen, then keep a dot wherever a pixel is lit.
+function buildTextDots() {
+  const pg = createGraphics(GRID, GRID);
+  pg.pixelDensity(1);
+  pg.background(0);
+  pg.fill(255);
+  pg.noStroke();
+  pg.textAlign(CENTER, CENTER);
+
+  const gap = 1.22;
+  const total =
