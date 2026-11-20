@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Encode End-of-Year Party</title>
+  <script src="https://cdn.jsdelivr.net/npm/p5@1.9.4/lib/p5.min.js"></script>
+  <style>
+    html, body { margin: 0; padding: 0; background: #EE2A37; overflow: hidden; }
+  </style>
+</head>
+<body>
+<script>
+const INVITE_URL = 'https://luma.com/p64iv1t6';
+
+const PILLAR_RED = '#EE2A37';   // sampled from the Pillar logo (238, 42, 55)
+
+// The invite sentence, set as a block of text that is built out of dots.
+const TEXT_LINES = [
+  { t: "You're invited to",      size: 60,  bold: true  },
+  { t: "Pillar VC's",            size: 110, bold: true  },
+  { t: "Encode End-of-Year",     size: 76,  bold: true  },
+  { t: "Party",                  size: 110, bold: true  },
+  { t: "Thursday 3rd December",  size: 56,  bold: true  },
+  { t: "from 6PM at the",        size: 56,  bold: true  },
+  { t: "Pillar London Office",   size: 56,  bold: true  },
+];
+
+const GRID = 1000;   // text is rasterised on a 1000x1000 grid, then sampled
+const STEP = 4;      // sampling step, in grid pixels (smaller = denser dots)
+
+let arm = [];        // one arm of the flake, in units of R
+let textDots = [];   // text dots, in units of R (-1..1)
+let R, cx, cy;
+
+// ripple state
+let front = 0;       // radius of the expanding ring (px)
+let ox = 0, oy = 0;  // ripple origin, relative to flake centre
+let amp = 0;         // ripple strength, eased
+let hoverAmt = 0;    // eased hover state
+let angle = 0;       // integrated spin angle
+
+// scratch values written by sampleWave()
+let wRev = 0, wWave = 0, wDx = 0, wDy = 0;
+
+function setup() {
+  createCanvas(windowWidth, windowHeight);
+  buildArm();
+  buildTextDots();
+  layout();
+}
+
+function windowResized() {
+  resizeCanvas(windowWidth, windowHeight);
+  layout();
+}
+
+function layout() {
+  R = min(width, height) * 0.38;
+  cx = width / 2;
+  cy = height / 2;
+}
+
+function buildArm() {
+  arm = [];
+  const N = 14;
+  const a = radians(60);
+  const branches = [[4, 3], [7, 4], [10, 3], [13, 2]];
+  for (let i = 1; i <= N; i++) arm.push({ x: i / N, y: 0, s: i === N ? 1.6 : 1.0 });
+  for (const [idx, count] of branches) {
+    for (let k = 1; k <= count; k++) {
+      const x = (idx + k * cos(a)) / N;
+      const y = (k * sin(a)) / N;
+      const s = k === count ? 1.3 : 0.85;
+      arm.push({ x, y, s });
+      arm.push({ x, y: -y, s });
+    }
+  }
+}
+
+// Render the text offscreen, then keep a dot wherever a pixel is lit.
+function buildTextDots() {
+  const pg = createGraphics(GRID, GRID);
+  pg.pixelDensity(1);
+  pg.background(0);
+  pg.fill(255);
+  pg.noStroke();
+  pg.textAlign(CENTER, CENTER);
+
+  const gap = 1.22;
+  const total = TEXT_LINES.reduce((s, L) => s + L.size * gap, 0);
+  let y = (GRID - total) / 2;
+  for (const L of TEXT_LINES) {
+    pg.drawingContext.font = `${L.bold ? 'bold' : 'normal'} ${L.size}px Helvetica, Arial, sans-serif`;
+    pg.text(L.t, GRID / 2, y + (L.size * gap) / 2);
+    y += L.size * gap;
+  }
+
+  pg.loadPixels();
+  const dn = pg.pixelDensity();
+  textDots = [];
+  for (let py = STEP / 2; py < GRID; py += STEP) {
+    for (let px = STEP / 2; px < GRID; px += STEP) {
+      const i = 4 * (floor(py * dn) * (GRID * dn) + floor(px * dn));
+      if (pg.pixels[i] > 110) {
+        textDots.push({ x: (px - GRID / 2) / (GRID / 2), y: (py - GRID / 2) / (GRID / 2) });
+      }
+    }
+  }
+  pg.remove();
+}
+
+function isHovering() {
+  return dist(mouseX, mouseY, cx, cy) < R * 1.05;
+}
+
+function smoothstep(a, b, x) {
+  const t = constrain((x - a) / (b - a), 0, 1);
+  return t * t * (3 - 2 * t);
+}
+
+// For a point (px, py) relative to the flake centre, work out how far the
+// ripple has got: wRev = revealed (0..1), wWave = ring displacement (-1..1).
+function sampleWave(px, py, w) {
+  const dx = px - ox, dy = py - oy;
+  const d = Math.hypot(dx, dy) || 1e-6;
+  const u = front - d;                                   // >0 once the ring has passed
+  wRev = smoothstep(-w * 0.3, w * 0.3, u);
+  const lead = smoothstep(-w * 0.6, 0, u);
+  const tail = Math.exp(-Math.max(u, 0) / (w * 2.5));
+  wWave = lead * tail * Math.sin(u / (w * 0.5)) * amp;
+  wDx = dx / d;
+  wDy = dy / d;
+}
+
+function draw() {
+  background(PILLAR_RED);
+
+  const dt = min(deltaTime, 50) / 1000;
+  const hovering = isHovering();
+  cursor(hovering ? HAND : ARROW);
+
+  // start a new ripple from wherever the cursor entered
+  if (hovering && front <= 0.001) {
+    ox = mouseX - cx;
+    oy = mouseY - cy;
+  }
+
+  const maxFront = R * 2.3;
+  const speed = R * 2.2;                      // ring reaches the far edge in ~1s
+  const prev = front;
+  front = constrain(front + (hovering ? speed * dt : -speed * 1.3 * dt), 0, maxFront);
+  const animating = front > 0 && front < maxFront && front !== prev;
+  amp = lerp(amp, animating ? 1 : 0, 0.12);
+  hoverAmt = lerp(hoverAmt, hovering ? 1 : 0, 0.1);
+
+  angle += dt * 0.08 * (1 - hoverAmt * 0.85);   // flake drifts, slows on hover
+
+  const w = R * 0.12;                         // ring width
+  const t = millis() / 1000;
+  const baseSize = R * 0.034;
+  const textSize = R * (STEP / 500) * 0.85;
+
+  noStroke();
+  push();
+  translate(cx, cy);
+
+  // soft halo
+  for (let i = 5; i > 0; i--) {
+    fill(255, 255, 255, 4 + hoverAmt * 3);
+    circle(0, 0, R * (0.6 + i * 0.22));
+  }
+
+  // ---- the flake (dims and ripples as the wave passes) ----
+  const drawFlakeDot = (px, py, size, seed) => {
+    sampleWave(px, py, w);
+    const twinkle = 0.88 + 0.12 * sin(t * 2 + seed);
+    const s = size * twinkle * (1 + wWave * 0.5);
+    const push_ = wWave * R * 0.025;
+    fill(255, 255, 255, 255 * (1 - 0.55 * wRev));
+    circle(px + wDx * push_, py + wDy * push_, s);
+  };
+
+  drawFlakeDot(0, 0, baseSize * 2.2, 0);
+  for (let k = 0; k < 6; k++) {
+    const a = angle + (TWO_PI / 6) * k;
+    const ca = cos(a), sa = sin(a);
+    for (let i = 0; i < arm.length; i++) {
+      const d = arm[i];
+      const lx = d.x * R, ly = d.y * R;
+      drawFlakeDot(lx * ca - ly * sa, lx * sa + ly * ca, baseSize * d.s, i * 1.7 + k);
+    }
+  }
+
+  // ---- the text (built from dots, revealed by the same ripple) ----
+  if (front > 0.5) {
+    for (let i = 0; i < textDots.length; i++) {
+      const d = textDots[i];
+      const px = d.x * R, py = d.y * R;
+      sampleWave(px, py, w);
+      if (wRev < 0.01) continue;
+      const push_ = wWave * R * 0.02;
+      fill(255, 255, 255, 255 * wRev);
+      circle(px + wDx * push_, py + wDy * push_, textSize * wRev * (1 + wWave * 0.7));
+    }
+  }
+  pop();
+}
+
+function mouseClicked() {
+  if (isHovering()) window.open(INVITE_URL, '_blank', 'noopener');
+}
+</script>
+</body>
+</html>
