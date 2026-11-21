@@ -3,10 +3,11 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Encode End-of-Year Party</title>
+  <title>UK End-of-Year Party</title>
   <script src="https://cdn.jsdelivr.net/npm/p5@1.9.4/lib/p5.min.js"></script>
   <style>
     html, body { margin: 0; padding: 0; background: #EE2A37; overflow: hidden; }
+    canvas { touch-action: manipulation; }   /* instant taps on mobile, no double-tap zoom */
   </style>
 </head>
 <body>
@@ -19,7 +20,7 @@ const PILLAR_RED = '#EE2A37';   // sampled from the Pillar logo (238, 42, 55)
 const TEXT_LINES = [
   { t: "You're invited to",      size: 60,  bold: true  },
   { t: "Pillar VC's",            size: 110, bold: true  },
-  { t: "Encode End-of-Year",     size: 76,  bold: true  },
+  { t: "UK End-of-Year",         size: 90,  bold: true  },
   { t: "Party",                  size: 110, bold: true  },
   { t: "Thursday 3rd December",  size: 56,  bold: true  },
   { t: "from 6PM at the",        size: 56,  bold: true  },
@@ -40,14 +41,53 @@ let amp = 0;         // ripple strength, eased
 let hoverAmt = 0;    // eased hover state
 let angle = 0;       // integrated spin angle
 
+// touch state (phones/tablets have no hover, so a tap reveals, a second tap opens the link)
+let usingTouch = false;
+let touchRevealed = false;
+let tapX = 0, tapY = 0;
+
 // scratch values written by sampleWave()
 let wRev = 0, wWave = 0, wDx = 0, wDy = 0;
 
 function setup() {
-  createCanvas(windowWidth, windowHeight);
+  const cnv = createCanvas(windowWidth, windowHeight);
   buildArm();
   buildTextDots();
   layout();
+
+  // Work out whether the last input was touch or mouse.
+  cnv.elt.addEventListener('pointerdown', (e) => {
+    usingTouch = e.pointerType === 'touch' || e.pointerType === 'pen';
+  });
+  cnv.elt.addEventListener('pointermove', (e) => {
+    if (e.pointerType === 'mouse') usingTouch = false;
+  });
+
+  // A native 'click' fires for both mouse clicks and taps, and counts as a real
+  // user gesture, so the link opens on desktop and mobile.
+  cnv.elt.addEventListener('click', (e) => {
+    const rect = cnv.elt.getBoundingClientRect();
+    const x = e.clientX - rect.left, y = e.clientY - rect.top;
+    const inside = dist(x, y, cx, cy) < R * 1.05;
+
+    if (!usingTouch) {                 // desktop: hover already revealed it
+      if (inside) openInvite();
+      return;
+    }
+    if (!inside) { touchRevealed = false; return; }   // tap outside hides the text
+    if (!touchRevealed) {              // first tap: ripple from the finger
+      touchRevealed = true;
+      tapX = x; tapY = y;
+    } else {                           // second tap: go to the invite
+      openInvite();
+    }
+  });
+}
+
+function openInvite() {
+  const w = window.open(INVITE_URL, '_blank');
+  if (w) w.opener = null;
+  else window.location.href = INVITE_URL;   // popup blocked / in-app browser
 }
 
 function windowResized() {
@@ -56,7 +96,7 @@ function windowResized() {
 }
 
 function layout() {
-  R = min(width, height) * 0.38;
+  R = min(width, height) * (width < 600 ? 0.46 : 0.38);   // bigger flake on phones
   cx = width / 2;
   cy = height / 2;
 }
@@ -137,13 +177,13 @@ function draw() {
   background(PILLAR_RED);
 
   const dt = min(deltaTime, 50) / 1000;
-  const hovering = isHovering();
-  cursor(hovering ? HAND : ARROW);
+  const hovering = usingTouch ? touchRevealed : isHovering();
+  cursor(!usingTouch && hovering ? HAND : ARROW);
 
-  // start a new ripple from wherever the cursor entered
+  // start a new ripple from wherever the cursor (or finger) entered
   if (hovering && front <= 0.001) {
-    ox = mouseX - cx;
-    oy = mouseY - cy;
+    ox = (usingTouch ? tapX : mouseX) - cx;
+    oy = (usingTouch ? tapY : mouseY) - cy;
   }
 
   const maxFront = R * 2.3;
@@ -205,10 +245,15 @@ function draw() {
     }
   }
   pop();
-}
 
-function mouseClicked() {
-  if (isHovering()) window.open(INVITE_URL, '_blank', 'noopener');
+  // touch only: tell people what the second tap does, once the text is fully shown
+  if (usingTouch && front > maxFront * 0.9) {
+    noStroke();
+    fill(255, 255, 255, 230);
+    textAlign(CENTER, CENTER);
+    drawingContext.font = `bold ${max(14, R * 0.07)}px Helvetica, Arial, sans-serif`;
+    text('Tap again to RSVP', cx, min(height - 24, cy + R * 1.12));
+  }
 }
 </script>
 </body>
